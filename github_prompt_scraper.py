@@ -8,6 +8,7 @@ import json
 from openai import OpenAI
 import mysql.connector
 from mysql.connector import Error
+import openai
 
 class GithubPromptScraper:
     def __init__(self):
@@ -42,15 +43,12 @@ class GithubPromptScraper:
             return None
 
     def insert_prompt(self, cursor, title, content):
-        try:
-            sql = """INSERT INTO PromptInfo (title, content, created_at, user_id, is_public)
-                     VALUES (%s, %s, %s, %s, %s)"""
-            values = (title, content, datetime.now(), 1, True)
-            cursor.execute(sql, values)
-            return cursor.lastrowid
-        except Error as e:
-            print(f"Error inserting prompt: {e}")
-            return None
+        description = self.generate_description(content)
+        cursor.execute('''
+            INSERT INTO PromptInfo (title, content, description, copied_times, is_public)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (title, content, description, 1, True))
+        return cursor.lastrowid
 
     def insert_tag(self, cursor, tag_name):
         try:
@@ -114,36 +112,31 @@ class GithubPromptScraper:
             time.sleep(2)
             return None
 
-    def extract_tags_with_deepseek(self, title, content):
+    def generate_tags(self, title, content):
+        """
+        分析内容并生成相关标签
+        返回最多4个标签
+        """
         try:
-            prompt = f"""Analyze the following prompt title and content, generate up to 4 relevant tags in English.
+            prompt = f"""Analyze the following prompt content and generate relevant tags.
+
+Content to analyze:
 Title: {title}
-Content Preview: {content[:500]}...
+Content: {content[:500]}...
 
-Requirements for tags:
-1. Must be single English words
-2. Must be relevant to the prompt's purpose or domain
-3. Should be common technical or professional terms
-4. No compound words or phrases
-5. No abbreviations except common ones (AI, ML, NLP)
+Requirements:
+1. Generate exactly 4 tags
+2. Each tag must be a single English word
+3. Tags should reflect the content's domain and purpose
+4. Avoid general terms like 'AI', 'GPT', 'prompt', 'assistant'
+5. Focus on professional/technical terms
 
-Examples of good tags:
-- Writing, Coding, Marketing, Analysis
-- Research, Teaching, Learning, Design
-- Business, Finance, Medical, Legal
-
-Examples of bad tags:
-- AIAssistant (compound word)
-- GPT (excluded term)
-- MachineLearning (should be separate)
-- Prompt (excluded term)
-
-Return only the tags, separated by commas (max 4 tags)."""
+Return only the tags, separated by commas."""
 
             response = self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
-                    {"role": "system", "content": "You are a professional English tag classifier. Generate only standard English tags."},
+                    {"role": "system", "content": "You are a professional content tagger. Generate precise and relevant tags."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
@@ -151,36 +144,22 @@ Return only the tags, separated by commas (max 4 tags)."""
                 stream=False
             )
 
-            # 解析响应并清理标签
             tags = response.choices[0].message.content.strip().split(',')
-            tags = [tag.strip() for tag in tags]
+            tags = [tag.strip().lower() for tag in tags]
             
-            # 过滤和清理标签
-            filtered_tags = []
-            excluded_tags = {'gpt', 'prompt', 'ai', 'assistant', '', 'bot', 'chatbot'}
+            # 过滤无效标签
+            excluded_tags = {'gpt', 'prompt', 'ai', 'assistant', 'bot', 'chatbot'}
+            filtered_tags = [
+                tag.capitalize() 
+                for tag in tags 
+                if tag and tag not in excluded_tags and len(tag) > 1 and (tag.isalpha() or tag in {'nlp', 'ml', 'ui', 'ux'})
+            ]
             
-            for tag in tags:
-                tag = tag.lower().strip()
-                # 只保留字母和常见缩写
-                if (
-                    tag and 
-                    tag not in excluded_tags and 
-                    len(tag) > 1 and 
-                    (tag.isalpha() or tag in {'nlp', 'ml', 'ui', 'ux'})
-                ):
-                    filtered_tags.append(tag.capitalize())  # 首字母大写
-            
-            # 确保最多4个标签
-            filtered_tags = filtered_tags[:4]
-            
-            if not filtered_tags:  # 如果没有有效标签
-                return ['Assistant']
-                
-            return filtered_tags
+            return filtered_tags[:4] if filtered_tags else ['Assistant']
 
         except Exception as e:
-            print(f"Error in DeepSeek tag extraction: {e}")
-            return ['Assistant']  # 默认标签
+            print(f"Error in tag generation: {e}")
+            return ['Assistant']
 
     def translate_to_english(self, text):
         try:
@@ -238,19 +217,22 @@ Return only the translated text, no explanations."""
                 content = self.get_file_content(file["download_url"])
                 
                 if content:
-                    # 插入prompt
+                    # 插入 PromptInfo
                     title = file["name"].replace(".md", "")
                     prompt_id = self.insert_prompt(cursor, title, content)
                     
                     if prompt_id:
-                        # 获取并插入标签
-                        tags = self.extract_tags_with_deepseek(title, content)
-                        print(f"Generated tags: {tags}")
+                        # 生成并插入标签
+                        tags = self.generate_tags(title, content)
+                        print(f"Generated tags for {title}: {tags}")
                         
                         for tag in tags:
+                            # 插入或获取已存在的标签ID
                             tag_id = self.insert_tag(cursor, tag)
                             if tag_id:
+                                # 创建 PromptInfo 和 Tags 的关联
                                 self.insert_prompt_tag(cursor, prompt_id, tag_id)
+                                print(f"Added tag '{tag}' to prompt '{title}'")
                 
                 time.sleep(0.5)
             
@@ -263,6 +245,44 @@ Return only the translated text, no explanations."""
         finally:
             cursor.close()
             connection.close()
+
+    def generate_description(self, content):
+        """
+        使用DeepSeek API根据prompt内容生成简短描述
+        返回200字以内的总结
+        """
+        try:
+            prompt = f"""Analyze the following prompt content and generate a concise description.
+
+Content to analyze:
+{content[:1000]}...
+
+Requirements:
+1. Maximum 200 characters in Chinese
+2. Focus on the main purpose and key features
+3. Describe what this prompt can do
+4. Be specific and practical
+
+Return the description directly, no additional text or explanation."""
+
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "You are a professional content analyzer. Generate concise descriptions in Chinese."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=150,
+                stream=False
+            )
+
+            description = response.choices[0].message.content.strip()
+            # 确保描述不超过200字
+            return description[:200]
+
+        except Exception as e:
+            print(f"Error in description generation: {e}")
+            return ""
 
 if __name__ == "__main__":
     scraper = GithubPromptScraper()

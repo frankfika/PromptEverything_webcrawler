@@ -7,9 +7,12 @@ CREATE TABLE IF NOT EXISTS PromptInfo (
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
-    user_id INT,
+    description VARCHAR(255) ,
+    copied_times INT DEFAULT 1,
     is_public BOOLEAN DEFAULT TRUE
 );
+
+
 
 CREATE TABLE IF NOT EXISTS Tags (
     id INT AUTO_INCREMENT PRIMARY KEY,
