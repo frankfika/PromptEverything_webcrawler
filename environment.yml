@@ -1,0 +1,11 @@
+name: prompt-scraper
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - requests
+  - beautifulsoup4
+  - pip
+  - pip:
+    - openai>=1.0.0  # 添加OpenAI客户端依赖

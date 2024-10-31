@@ -1,0 +1,28 @@
+CREATE DATABASE IF NOT EXISTS PromptEverything;
+USE PromptEverything;
+
+CREATE TABLE IF NOT EXISTS PromptInfo (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
+    user_id INT,
+    is_public BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE IF NOT EXISTS Tags (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS PromptTag (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    prompt_id INT,
+    tag_id INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_prompt_tag (prompt_id, tag_id),
+    FOREIGN KEY (prompt_id) REFERENCES PromptInfo(id),
+    FOREIGN KEY (tag_id) REFERENCES Tags(id)
+); 

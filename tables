@@ -1,0 +1,27 @@
+Table PromptEverything {
+  id INT [pk, increment]
+  title VARCHAR(255) [not null]
+  content TEXT [not null]
+  created_at TIMESTAMP [default: `now()`]
+  updated_at TIMESTAMP
+  user_id INT        // 关联用户ID
+  is_public BOOLEAN [default: true]
+}
+
+Table Tags {
+  id INT [pk, increment]
+  name VARCHAR(100) [unique, not null]
+  description TEXT
+  created_at TIMESTAMP [default: `now()`]
+}
+
+Table PromptTag {
+  id INT [pk, increment]
+  prompt_id INT [ref: > PromptEverything.id]
+  tag_id INT [ref: > Tags.id]
+  created_at TIMESTAMP [default: `now()`]
+  
+  Indexes {
+    (prompt_id, tag_id) [unique]
+  }
+}
